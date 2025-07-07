@@ -378,7 +378,8 @@ class ExcelGenerator:
 
 class PDFExtractor:
     def __init__(self):
-        self.wb = None
+        self.texto_completo = ""
+        self.info_extraida = {}
         
     def criar_workbook(self):
         """Cria um novo workbook Excel"""
