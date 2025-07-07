@@ -132,6 +132,8 @@ class ZipProcessor:
             'lista_dist_ee': self.pdfs_dist_ee,
             'lista_outros': [f for f in self.pdfs_encontrados if f not in self.pdfs_dist_ee]
         }
+
+class PDFExtractor:
     def __init__(self):
         self.texto_completo = ""
         self.info_extraida = {}
@@ -375,11 +377,8 @@ class ZipProcessor:
         return resultado
 
 class ExcelGenerator:
-
-class PDFExtractor:
     def __init__(self):
-        self.texto_completo = ""
-        self.info_extraida = {}
+        self.wb = None
         
     def criar_workbook(self):
         """Cria um novo workbook Excel"""
@@ -667,7 +666,7 @@ def main():
     # Informações sobre arquivos selecionados
     if uploaded_files:
         st.success(f"✅ {len(uploaded_files)} arquivo(s) DIST_EE pronto(s) para processamento")
-    
+
     # Botão de processamento
     if st.button("🚀 Processar PDFs", type="primary", disabled=not uploaded_files):
         
@@ -713,7 +712,7 @@ def main():
                 col1, col2, col3 = st.columns([2, 1, 1])
                 
                 with col1:
-                    st.write(f"📄 {uploaded_file.name}")
+                    st.write(f"📄 {nome_arquivo}")
                 
                 with col2:
                     if resultado['erro']:
@@ -762,7 +761,7 @@ def main():
         
         # Nome do arquivo com timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        nome_arquivo = f"faturas_extraidas_{timestamp}.xlsx"
+        nome_arquivo = f"faturas_DIST_EE_{timestamp}.xlsx"
         
         # Botão de download
         st.download_button(
@@ -785,7 +784,7 @@ def main():
             st.markdown("""
             <div class="success-box">
             <strong>🎉 Processamento concluído com sucesso!</strong><br>
-            Sua planilha Excel foi gerada com todas as informações extraídas.
+            Sua planilha Excel foi gerada com todas as informações extraídas dos PDFs DIST_EE.
             Cada PDF processado com sucesso tem sua própria aba na planilha.
             </div>
             """, unsafe_allow_html=True)
