@@ -3,6 +3,7 @@ import pandas as pd
 import re
 import io
 import zipfile
+import os
 from datetime import datetime
 import unicodedata
 import pymupdf as fitz
@@ -78,7 +79,59 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-class PDFExtractor:
+class ZipProcessor:
+    def __init__(self):
+        self.pdfs_encontrados = []
+        self.pdfs_dist_ee = []
+        
+    def processar_zip(self, zip_bytes):
+        """Processa arquivo ZIP e extrai PDFs que contenham DIST_EE"""
+        try:
+            pdfs_extraidos = []
+            
+            with zipfile.ZipFile(io.BytesIO(zip_bytes), 'r') as zip_ref:
+                # Listar todos os arquivos no ZIP
+                todos_arquivos = zip_ref.namelist()
+                self.pdfs_encontrados = [f for f in todos_arquivos if f.lower().endswith('.pdf')]
+                
+                # Filtrar apenas PDFs com DIST_EE no nome
+                pdfs_dist_ee = [f for f in self.pdfs_encontrados if 'DIST_EE' in f.upper()]
+                self.pdfs_dist_ee = pdfs_dist_ee
+                
+                # Extrair conteúdo dos PDFs filtrados
+                for nome_arquivo in pdfs_dist_ee:
+                    try:
+                        # Extrair arquivo do ZIP
+                        pdf_bytes = zip_ref.read(nome_arquivo)
+                        
+                        # Criar objeto tipo arquivo para compatibilidade
+                        pdf_info = {
+                            'name': os.path.basename(nome_arquivo),
+                            'bytes': pdf_bytes,
+                            'size': len(pdf_bytes)
+                        }
+                        
+                        pdfs_extraidos.append(pdf_info)
+                        
+                    except Exception as e:
+                        st.warning(f"Erro ao extrair {nome_arquivo}: {str(e)}")
+                        continue
+            
+            return pdfs_extraidos, len(self.pdfs_encontrados), len(self.pdfs_dist_ee)
+            
+        except Exception as e:
+            st.error(f"Erro ao processar arquivo ZIP: {str(e)}")
+            return [], 0, 0
+    
+    def get_estatisticas(self):
+        """Retorna estatísticas do processamento do ZIP"""
+        return {
+            'total_pdfs': len(self.pdfs_encontrados),
+            'pdfs_dist_ee': len(self.pdfs_dist_ee),
+            'pdfs_outros': len(self.pdfs_encontrados) - len(self.pdfs_dist_ee),
+            'lista_dist_ee': self.pdfs_dist_ee,
+            'lista_outros': [f for f in self.pdfs_encontrados if f not in self.pdfs_dist_ee]
+        }
     def __init__(self):
         self.texto_completo = ""
         self.info_extraida = {}
@@ -322,6 +375,8 @@ class PDFExtractor:
         return resultado
 
 class ExcelGenerator:
+
+class PDFExtractor:
     def __init__(self):
         self.wb = None
         
@@ -466,8 +521,8 @@ class ExcelGenerator:
 # Interface Streamlit
 def main():
     # Cabeçalho
-    st.markdown('<h1 class="main-header">⚡ Extrator de Faturas PDF</h1>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Extraia automaticamente informações de suas faturas de energia elétrica</p>', unsafe_allow_html=True)
+    st.markdown('<h1 class="main-header">⚡ Extrator de Faturas PDF - DIST_EE</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Extraia automaticamente informações de faturas DIST_EE de arquivos ZIP ou PDFs individuais</p>', unsafe_allow_html=True)
     
     # Informações sobre funcionalidades
     with st.expander("ℹ️ Como usar esta ferramenta", expanded=False):
@@ -475,11 +530,21 @@ def main():
         <div class="feature-card">
         <h4>🎯 O que esta ferramenta faz:</h4>
         <ul>
+            <li><strong>Aceita arquivos ZIP</strong> e extrai apenas PDFs com "DIST_EE" no nome</li>
+            <li><strong>Processa PDFs individuais</strong> que contenham "DIST_EE"</li>
             <li><strong>Extrai número de instalação</strong> automaticamente</li>
             <li><strong>Identifica a referência</strong> (mês/ano) da fatura</li>
             <li><strong>Localiza e extrai a tabela "Itens de Fatura"</strong></li>
             <li><strong>Gera planilha Excel formatada</strong> com os dados</li>
             <li><strong>Funciona offline</strong> - sem necessidade de API externa</li>
+        </ul>
+        </div>
+        
+        <div class="feature-card">
+        <h4>📁 Tipos de arquivo aceitos:</h4>
+        <ul>
+            <li><strong>Arquivos ZIP:</strong> O sistema irá extrair e processar apenas os PDFs que contenham "DIST_EE" no nome</li>
+            <li><strong>PDFs individuais:</strong> Serão processados apenas se o nome contiver "DIST_EE"</li>
         </ul>
         </div>
         """, unsafe_allow_html=True)
@@ -506,21 +571,101 @@ def main():
         """, unsafe_allow_html=True)
     
     # Upload de arquivos
-    st.markdown("### 📂 Selecione seus arquivos PDF")
-    uploaded_files = st.file_uploader(
-        "Arraste e solte ou clique para selecionar",
-        type=['pdf'],
-        accept_multiple_files=True,
-        help="Você pode selecionar múltiplos arquivos PDF de faturas de energia"
-    )
+    st.markdown("### 📂 Selecione seus arquivos")
     
-    if uploaded_files:
-        st.markdown(f"✅ {len(uploaded_files)} arquivo(s) selecionado(s)")
+    # Abas para diferentes tipos de upload
+    tab1, tab2 = st.tabs(["📦 Arquivo ZIP", "📄 PDFs Individuais"])
+    
+    uploaded_files = []
+    zip_stats = None
+    
+    with tab1:
+        st.markdown("**Envie um arquivo ZIP contendo PDFs de faturas**")
+        uploaded_zip = st.file_uploader(
+            "Selecione arquivo ZIP",
+            type=['zip'],
+            help="O sistema extrairá apenas PDFs que contenham 'DIST_EE' no nome"
+        )
         
-        # Mostrar lista de arquivos
-        with st.expander("📋 Arquivos selecionados"):
-            for i, file in enumerate(uploaded_files, 1):
-                st.write(f"{i}. {file.name} ({file.size:,} bytes)")
+        if uploaded_zip:
+            # Processar ZIP
+            zip_processor = ZipProcessor()
+            zip_bytes = uploaded_zip.read()
+            pdfs_extraidos, total_pdfs, pdfs_dist_ee = zip_processor.processar_zip(zip_bytes)
+            zip_stats = zip_processor.get_estatisticas()
+            
+            if pdfs_extraidos:
+                uploaded_files = pdfs_extraidos
+                
+                # Mostrar estatísticas do ZIP
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("📄 Total PDFs no ZIP", total_pdfs)
+                with col2:
+                    st.metric("⚡ PDFs DIST_EE", pdfs_dist_ee)
+                with col3:
+                    st.metric("🚫 PDFs ignorados", total_pdfs - pdfs_dist_ee)
+                
+                # Mostrar detalhes dos arquivos encontrados
+                if zip_stats['pdfs_dist_ee'] > 0:
+                    with st.expander(f"✅ {zip_stats['pdfs_dist_ee']} PDFs DIST_EE encontrados"):
+                        for pdf in zip_stats['lista_dist_ee']:
+                            st.write(f"📄 {os.path.basename(pdf)}")
+                
+                if zip_stats['pdfs_outros'] > 0:
+                    with st.expander(f"🚫 {zip_stats['pdfs_outros']} PDFs ignorados (sem DIST_EE)"):
+                        for pdf in zip_stats['lista_outros']:
+                            st.write(f"📄 {os.path.basename(pdf)}")
+            else:
+                st.warning("❌ Nenhum PDF com 'DIST_EE' encontrado no arquivo ZIP")
+    
+    with tab2:
+        st.markdown("**Envie PDFs individuais (apenas arquivos com 'DIST_EE' no nome serão processados)**")
+        uploaded_pdfs = st.file_uploader(
+            "Selecione PDFs individuais",
+            type=['pdf'],
+            accept_multiple_files=True,
+            help="Apenas PDFs que contenham 'DIST_EE' no nome serão processados"
+        )
+        
+        if uploaded_pdfs:
+            # Filtrar apenas PDFs com DIST_EE
+            pdfs_dist_ee = [pdf for pdf in uploaded_pdfs if 'DIST_EE' in pdf.name.upper()]
+            pdfs_ignorados = [pdf for pdf in uploaded_pdfs if 'DIST_EE' not in pdf.name.upper()]
+            
+            if pdfs_dist_ee:
+                # Converter para formato compatível
+                uploaded_files = []
+                for pdf in pdfs_dist_ee:
+                    uploaded_files.append({
+                        'name': pdf.name,
+                        'bytes': pdf.read(),
+                        'size': pdf.size
+                    })
+                
+                # Mostrar estatísticas
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("✅ PDFs DIST_EE", len(pdfs_dist_ee))
+                with col2:
+                    st.metric("🚫 PDFs ignorados", len(pdfs_ignorados))
+                
+                # Mostrar listas
+                if pdfs_dist_ee:
+                    with st.expander(f"✅ {len(pdfs_dist_ee)} PDFs que serão processados"):
+                        for pdf in pdfs_dist_ee:
+                            st.write(f"📄 {pdf.name} ({pdf.size:,} bytes)")
+                
+                if pdfs_ignorados:
+                    with st.expander(f"🚫 {len(pdfs_ignorados)} PDFs ignorados (sem DIST_EE)"):
+                        for pdf in pdfs_ignorados:
+                            st.write(f"📄 {pdf.name}")
+            else:
+                st.warning("❌ Nenhum PDF com 'DIST_EE' encontrado nos arquivos selecionados")
+    
+    # Informações sobre arquivos selecionados
+    if uploaded_files:
+        st.success(f"✅ {len(uploaded_files)} arquivo(s) DIST_EE pronto(s) para processamento")
     
     # Botão de processamento
     if st.button("🚀 Processar PDFs", type="primary", disabled=not uploaded_files):
@@ -545,11 +690,21 @@ def main():
             # Atualizar progresso
             progress = (idx + 1) / len(uploaded_files)
             progress_bar.progress(progress)
-            status_text.text(f"🔍 Processando {idx + 1}/{len(uploaded_files)}: {uploaded_file.name}")
+            
+            # Verificar se é objeto tipo dicionário (do ZIP) ou objeto file do Streamlit
+            if isinstance(uploaded_file, dict):
+                nome_arquivo = uploaded_file['name']
+                pdf_bytes = uploaded_file['bytes']
+                tamanho_arquivo = uploaded_file['size']
+            else:
+                nome_arquivo = uploaded_file.name
+                pdf_bytes = uploaded_file.read()
+                tamanho_arquivo = uploaded_file.size
+            
+            status_text.text(f"🔍 Processando {idx + 1}/{len(uploaded_files)}: {nome_arquivo}")
             
             # Processar PDF
-            pdf_bytes = uploaded_file.read()
-            resultado = extractor.processar_pdf(pdf_bytes, uploaded_file.name)
+            resultado = extractor.processar_pdf(pdf_bytes, nome_arquivo)
             resultados.append(resultado)
             
             # Mostrar resultado em tempo real
